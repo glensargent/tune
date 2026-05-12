@@ -1,5 +1,6 @@
 import { createSignal, createEffect, onCleanup, Show, on } from 'solid-js'
 import { formatTime } from '../lib/audio'
+import DeviceSelect from './DeviceSelect'
 
 interface PlayerProps {
   audioUrl: string
@@ -19,6 +20,7 @@ export default function Player(props: PlayerProps) {
   const [selectionEnd, setSelectionEnd] = createSignal<number | null>(props.initialEnd ?? null)
   const [selecting, setSelecting] = createSignal(false)
   const [waveformData, setWaveformData] = createSignal<number[]>([])
+  const [outputId, setOutputId] = createSignal<string | undefined>()
 
   let audio: HTMLAudioElement | null = null
   let rafId: number | null = null
@@ -31,6 +33,10 @@ export default function Player(props: PlayerProps) {
     }
     audio = new Audio(props.audioUrl)
     audio.playbackRate = speed()
+    const oid = outputId()
+    if (oid && 'setSinkId' in audio) {
+      try { (audio as any).setSinkId(oid) } catch {}
+    }
     audio.addEventListener('loadedmetadata', () => {
       setDuration(audio!.duration)
       if (props.initialStart != null) {
@@ -151,6 +157,13 @@ export default function Player(props: PlayerProps) {
     if (audio) audio.playbackRate = newSpeed
   }
 
+  // Update output device on existing audio element when changed
+  createEffect(on(() => outputId(), (oid) => {
+    if (audio && oid && 'setSinkId' in audio) {
+      try { (audio as any).setSinkId(oid) } catch {}
+    }
+  }))
+
   function clearSelection() {
     setSelectionStart(null)
     setSelectionEnd(null)
@@ -183,19 +196,22 @@ export default function Player(props: PlayerProps) {
 
   return (
     <div class="flex flex-col gap-4 w-full">
-      {/* Track name */}
-      <div class="flex items-center justify-between">
+      {/* Header row */}
+      <div class="flex items-center justify-between gap-2">
         <h3 class="text-lg font-semibold text-text truncate">{props.name}</h3>
-        <button
+        <div class="flex items-center gap-2 shrink-0">
+          <DeviceSelect kind="audiooutput" selectedId={outputId()} onSelect={setOutputId} />
+          <button
           onClick={() => setSelecting(!selecting())}
           class={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors cursor-pointer ${
             selecting()
               ? 'bg-accent text-white'
               : 'bg-surface-3 text-text-muted hover:text-text'
           }`}
-        >
-          {selecting() ? 'Selecting...' : 'Select Segment'}
-        </button>
+          >
+            {selecting() ? 'Selecting...' : 'Select Segment'}
+          </button>
+        </div>
       </div>
 
       {/* Waveform */}

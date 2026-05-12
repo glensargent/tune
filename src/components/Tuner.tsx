@@ -1,6 +1,6 @@
 import { createSignal, onCleanup } from 'solid-js'
 import { detectPitch, type PitchResult } from '../lib/pitch'
-import MicSelect from './MicSelect'
+import DeviceSelect from './DeviceSelect'
 
 export default function Tuner() {
   const [listening, setListening] = createSignal(false)
@@ -142,7 +142,7 @@ export default function Tuner() {
     <div class="flex flex-col items-center gap-6">
       {/* Mic selector */}
       <div class="self-end">
-        <MicSelect selectedId={deviceId()} onSelect={setDeviceId} />
+        <DeviceSelect kind="audioinput" selectedId={deviceId()} onSelect={setDeviceId} />
       </div>
 
       {/* Tuner gauge */}

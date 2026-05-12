@@ -1,6 +1,10 @@
 import { createSignal, onCleanup } from 'solid-js'
 
-export default function Metronome() {
+interface MetronomeProps {
+  outputDeviceId?: string
+}
+
+export default function Metronome(props: MetronomeProps) {
   const [bpm, setBpm] = createSignal(120)
   const [playing, setPlaying] = createSignal(false)
   const [beat, setBeat] = createSignal(0)
@@ -42,8 +46,11 @@ export default function Metronome() {
     timerId = setTimeout(schedule, 25)
   }
 
-  function start() {
+  async function start() {
     audioCtx = new AudioContext()
+    if (props.outputDeviceId && 'setSinkId' in audioCtx) {
+      try { await (audioCtx as any).setSinkId(props.outputDeviceId) } catch {}
+    }
     currentBeat = 0
     nextBeatTime = audioCtx.currentTime
     setPlaying(true)

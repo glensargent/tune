@@ -1,5 +1,5 @@
 import { createSignal, onCleanup, Show } from 'solid-js'
-import MicSelect from './MicSelect'
+import DeviceSelect from './DeviceSelect'
 import Metronome from './Metronome'
 
 interface RecorderProps {
@@ -11,6 +11,7 @@ export default function Recorder(props: RecorderProps) {
   const [elapsed, setElapsed] = createSignal(0)
   const [level, setLevel] = createSignal(0)
   const [deviceId, setDeviceId] = createSignal<string | undefined>()
+  const [outputId, setOutputId] = createSignal<string | undefined>()
 
   let mediaRecorder: MediaRecorder | null = null
   let stream: MediaStream | null = null
@@ -93,9 +94,10 @@ export default function Recorder(props: RecorderProps) {
 
   return (
     <div class="flex flex-col items-center gap-6">
-      {/* Mic selector */}
-      <div class="self-end">
-        <MicSelect selectedId={deviceId()} onSelect={setDeviceId} />
+      {/* Device selectors */}
+      <div class="self-end flex gap-2">
+        <DeviceSelect kind="audioinput" selectedId={deviceId()} onSelect={setDeviceId} />
+        <DeviceSelect kind="audiooutput" selectedId={outputId()} onSelect={setOutputId} />
       </div>
 
       {/* Level indicator */}
@@ -140,7 +142,7 @@ export default function Recorder(props: RecorderProps) {
 
       {/* Metronome */}
       <div class="w-full border-t border-border pt-6 mt-2">
-        <Metronome />
+        <Metronome outputDeviceId={outputId()} />
       </div>
     </div>
   )
