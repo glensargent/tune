@@ -8,7 +8,7 @@ export const formatTime = (seconds: number): string => {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-export const computeRms = (data: Uint8Array): number => {
+export const computeRms = (data: Uint8Array<ArrayBufferLike>): number => {
   let sum = 0
   for (let i = 0; i < data.length; i++) {
     const v = (data[i] - 128) / 128

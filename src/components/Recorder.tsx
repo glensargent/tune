@@ -23,7 +23,7 @@ export default function Recorder(props: RecorderProps) {
   let stream: MediaStream | null = null
   let audioCtx: AudioContext | null = null
   let analyser: AnalyserNode | null = null
-  let analyserData: Uint8Array | null = null
+  let analyserData: Uint8Array<ArrayBuffer> | null = null
   let mediaRecorder: MediaRecorder | null = null
   let timer: ReturnType<typeof setInterval> | null = null
   let rafId: number | null = null
