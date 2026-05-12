@@ -10,6 +10,7 @@
     "deploy": "pnpm run build && wrangler deploy"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "solid-js": "^1.9.12"
   },
   "devDependencies": {

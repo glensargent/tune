@@ -6,7 +6,7 @@ import DeviceSelect from './DeviceSelect'
 import Metronome from './Metronome'
 
 interface RecorderProps {
-  onRecorded: (blob: Blob, name: string, waveform: number[], duration: number) => void
+  onRecorded: (blob: Blob, name: string, waveform: number[], duration: number, pcm: Float32Array, sampleRate: number) => void
   onFileUpload: (e: Event) => void
 }
 
@@ -25,6 +25,9 @@ export default function Recorder(props: RecorderProps) {
   let analyser: AnalyserNode | null = null
   let analyserData: Uint8Array<ArrayBuffer> | null = null
   let mediaRecorder: MediaRecorder | null = null
+  let pcmCapture: ScriptProcessorNode | null = null
+  let pcmChunks: Float32Array[] = []
+  let recordingSampleRate = 44100
   let timer: ReturnType<typeof setInterval> | null = null
   let rafId: number | null = null
   let waveformSamples: number[] = []
@@ -67,6 +70,16 @@ export default function Recorder(props: RecorderProps) {
       dest.channelCountMode = 'explicit'
       source.connect(dest)
 
+      // Capture raw PCM for reliable encoding later
+      pcmChunks = []
+      recordingSampleRate = audioCtx.sampleRate
+      pcmCapture = audioCtx.createScriptProcessor(4096, 1, 1)
+      pcmCapture.onaudioprocess = e => {
+        pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)))
+      }
+      source.connect(pcmCapture)
+      pcmCapture.connect(audioCtx.destination) // must be connected to work
+
       tick()
 
       mediaRecorder = new MediaRecorder(dest.stream)
@@ -80,7 +93,17 @@ export default function Recorder(props: RecorderProps) {
         const blob = new Blob(chunks, { type: mediaRecorder!.mimeType })
         const name = `Recording ${new Date().toLocaleTimeString()}`
         const dur = (performance.now() - recordStartTime) / 1000
-        props.onRecorded(blob, name, normalizeWaveform(waveformSamples), dur)
+
+        // Merge PCM chunks into a single Float32Array
+        const totalLength = pcmChunks.reduce((sum, c) => sum + c.length, 0)
+        const pcm = new Float32Array(totalLength)
+        let offset = 0
+        for (const chunk of pcmChunks) {
+          pcm.set(chunk, offset)
+          offset += chunk.length
+        }
+
+        props.onRecorded(blob, name, normalizeWaveform(waveformSamples), dur, pcm, recordingSampleRate)
       }
 
       waveformSamples = []
@@ -99,6 +122,8 @@ export default function Recorder(props: RecorderProps) {
     mediaRecorder?.stop()
     stopStream(stream)
     stream = null
+    pcmCapture?.disconnect()
+    pcmCapture = null
     audioCtx?.close()
     audioCtx = null
     analyser = null

@@ -1,10 +1,12 @@
-import { createSignal, createEffect, onCleanup, Show, on } from 'solid-js'
+import { createSignal, createEffect, onCleanup, Show, For, on } from 'solid-js'
 import { formatTime, decodeAudioBuffer, extractWaveformBars, setSinkId } from '../lib/audio'
+import { encodeWav, encodeMp3, encodeWavFromPcm, encodeMp3FromPcm, audioBufferFromBlob } from '../lib/encode'
 import { createPersistedSignal } from '../lib/persist'
 import DeviceSelect from './DeviceSelect'
 
 interface PlayerProps {
   audioUrl: string
+  audioBlob: Blob
   name: string
   initialSpeed?: number
   initialStart?: number
@@ -13,6 +15,8 @@ interface PlayerProps {
   onClose?: () => void
   precomputedWaveform?: number[]
   precomputedDuration?: number
+  pcm?: Float32Array
+  pcmSampleRate?: number
 }
 
 const DRAG_THRESHOLD = 5
@@ -20,6 +24,8 @@ const SKIP_SECONDS = 5
 const WAVEFORM_BARS = 150
 const SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const
 const MIN_SELECTION_DURATION = 0.2
+const DOWNLOAD_FORMATS = ['mp3', 'wav', 'original'] as const
+type DownloadFormat = typeof DOWNLOAD_FORMATS[number]
 
 const pctOfDuration = (time: number, duration: number): number =>
   duration > 0 ? (time / duration) * 100 : 0
@@ -36,6 +42,8 @@ export default function Player(props: PlayerProps) {
   const [selEnd, setSelEnd] = createSignal<number | null>(props.initialEnd ?? null)
   const [waveformData, setWaveformData] = createSignal<number[]>([])
   const [outputId, setOutputId] = createPersistedSignal<string | undefined>('tune:output-device', undefined)
+  const [downloadFormat, setDownloadFormat] = createSignal<DownloadFormat>('mp3')
+  const [downloading, setDownloading] = createSignal(false)
 
   let audio: HTMLAudioElement | null = null
   let rafId: number | null = null
@@ -174,6 +182,52 @@ export default function Player(props: PlayerProps) {
     if (audio) await setSinkId(audio, oid)
   }))
 
+  const handleDownload = async () => {
+    setDownloading(true)
+    try {
+      const fmt = downloadFormat()
+      let blob: Blob
+      let ext: string
+
+      if (fmt === 'original') {
+        blob = props.audioBlob
+        const mime = props.audioBlob.type
+        ext = mime.includes('webm') ? 'webm' : mime.includes('mp4') ? 'mp4' : 'audio'
+      } else if (props.pcm && props.pcmSampleRate) {
+        // Use captured PCM data (recordings) — avoids webm decode issues
+        if (fmt === 'mp3') {
+          blob = encodeMp3FromPcm(props.pcm, props.pcmSampleRate)
+          ext = 'mp3'
+        } else {
+          blob = new Blob([encodeWavFromPcm(props.pcm, props.pcmSampleRate)], { type: 'audio/wav' })
+          ext = 'wav'
+        }
+      } else {
+        // Uploaded files — decode normally
+        const decoded = await audioBufferFromBlob(props.audioBlob)
+        if (fmt === 'mp3') {
+          blob = encodeMp3(decoded)
+          ext = 'mp3'
+        } else {
+          blob = new Blob([encodeWav(decoded)], { type: 'audio/wav' })
+          ext = 'wav'
+        }
+      }
+
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${props.name.replace(/\.[^.]+$/, '')}.${ext}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (e) {
+      console.error('Download failed:', e)
+    }
+    setDownloading(false)
+  }
+
   const clearSelection = () => { setSelStart(null); setSelEnd(null) }
 
   const cutSelection = () => {
@@ -282,18 +336,43 @@ export default function Player(props: PlayerProps) {
         </button>
 
         <button onClick={() => skip(SKIP_SECONDS)} class="p-2 rounded-lg hover:bg-surface-3 text-text-muted hover:text-text transition-colors cursor-pointer" title="Forward 5s">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24">
-            <path d="M3.934 11.2a1 1 0 000 1.6l7.2 5.4a1 1 0 001.6-.8V6.6a1 1 0 00-1.6-.8l-7.2 5.4z" fill="currentColor" />
-            <path d="M11.934 11.2a1 1 0 000 1.6l7.2 5.4a1 1 0 001.6-.8V6.6a1 1 0 00-1.6-.8l-7.2 5.4z" fill="currentColor" />
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M12.066 11.2a1 1 0 010 1.6l-7.2 5.4A1 1 0 013.266 17.4V6.6a1 1 0 011.6-.8l7.2 5.4z" fill="currentColor" />
+            <path d="M20.066 11.2a1 1 0 010 1.6l-7.2 5.4a1 1 0 01-1.6-.8V6.6a1 1 0 011.6-.8l7.2 5.4z" fill="currentColor" />
           </svg>
         </button>
       </div>
 
-      <div class="flex flex-col gap-2">
-        <div class="flex items-center justify-between">
-          <span class="text-xs text-text-muted">Speed</span>
-          <span class="text-xs font-mono text-text">{speed()}x</span>
+      {/* Download */}
+      <div class="flex items-center justify-center gap-2">
+        <div class="flex gap-1">
+          <For each={DOWNLOAD_FORMATS}>
+            {fmt => (
+              <button
+                onClick={() => setDownloadFormat(fmt)}
+                class={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors cursor-pointer ${
+                  downloadFormat() === fmt ? 'bg-accent text-white' : 'bg-surface-3 text-text-muted hover:text-text'
+                }`}
+              >
+                {fmt === 'original' ? 'Original' : fmt.toUpperCase()}
+              </button>
+            )}
+          </For>
         </div>
+        <button
+          onClick={handleDownload}
+          disabled={downloading()}
+          class="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-surface-3 text-text-muted rounded-lg font-medium hover:text-text transition-colors cursor-pointer disabled:opacity-50"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+          </svg>
+          {downloading() ? 'Converting...' : 'Download'}
+        </button>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <span class="text-xs text-text-muted">Speed</span>
         <div class="flex gap-1.5 flex-wrap">
           {SPEED_PRESETS.map(s => (
             <button

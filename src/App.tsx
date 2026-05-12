@@ -13,6 +13,8 @@ interface AudioTrack {
   name: string
   recordedWaveform?: number[]
   recordedDuration?: number
+  pcm?: Float32Array
+  pcmSampleRate?: number
 }
 
 const TABS: readonly { id: Tab; label: string; icon: string }[] = [
@@ -22,12 +24,14 @@ const TABS: readonly { id: Tab; label: string; icon: string }[] = [
 
 const hashConfig = parseHashConfig()
 
-const createTrack = (blob: Blob, name: string, waveform?: number[], duration?: number): AudioTrack => ({
+const createTrack = (blob: Blob, name: string, waveform?: number[], duration?: number, pcm?: Float32Array, pcmSampleRate?: number): AudioTrack => ({
   url: URL.createObjectURL(blob),
   blob,
   name,
   recordedWaveform: waveform,
   recordedDuration: duration,
+  pcm,
+  pcmSampleRate,
 })
 
 export default function App() {
@@ -49,8 +53,8 @@ export default function App() {
     input.value = ''
   }
 
-  const handleRecorded = (blob: Blob, name: string, waveform?: number[], duration?: number) =>
-    addTrack(createTrack(blob, name, waveform, duration))
+  const handleRecorded = (blob: Blob, name: string, waveform?: number[], duration?: number, pcm?: Float32Array, pcmSampleRate?: number) =>
+    addTrack(createTrack(blob, name, waveform, duration, pcm, pcmSampleRate))
 
   const handleSegmentCut = (start: number, end: number, speed: number) =>
     setShareData({ start, end, speed })
@@ -118,6 +122,7 @@ export default function App() {
               {track => (
                 <Player
                   audioUrl={track().url}
+                  audioBlob={track().blob}
                   name={track().name}
                   initialSpeed={hashConfig?.speed}
                   initialStart={hashConfig?.startTime}
@@ -126,6 +131,8 @@ export default function App() {
                   onClose={closeActiveTrack}
                   precomputedWaveform={track().recordedWaveform}
                   precomputedDuration={track().recordedDuration}
+                  pcm={track().pcm}
+                  pcmSampleRate={track().pcmSampleRate}
                 />
               )}
             </Show>
