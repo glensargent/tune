@@ -1,19 +1,16 @@
-import { createSignal, createResource, For, Show } from 'solid-js'
+import { createSignal, createResource, createEffect, on, For, Show, onCleanup } from 'solid-js'
 
 interface DeviceSelectProps {
   kind: 'audioinput' | 'audiooutput'
   selectedId: string | undefined
-  onSelect: (deviceId: string) => void
+  onSelect: (deviceId: string | undefined) => void
 }
 
 async function getDevices(kind: string): Promise<MediaDeviceInfo[]> {
-  // First try without getUserMedia — if permission was already granted,
-  // labels will be populated and we avoid grabbing/releasing the mic
   let devices = await navigator.mediaDevices.enumerateDevices()
   const hasLabels = devices.some(d => d.kind === kind && d.label)
 
   if (!hasLabels) {
-    // Need a brief getUserMedia to trigger the permission prompt
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       stream.getTracks().forEach(t => t.stop())
@@ -42,19 +39,40 @@ const speakerIcon = (
 
 export default function DeviceSelect(props: DeviceSelectProps) {
   const [open, setOpen] = createSignal(false)
-  // Eagerly fetch if there's a saved selection, otherwise wait for first open
   const [shouldFetch, setShouldFetch] = createSignal(!!props.selectedId)
-  const [devices] = createResource(() => shouldFetch() ? props.kind : false, (kind) => {
-    if (kind === false) return Promise.resolve([] as MediaDeviceInfo[])
-    return getDevices(kind)
-  })
+  const [fetchTrigger, setFetchTrigger] = createSignal(0)
+  const [devices, { refetch }] = createResource(
+    () => shouldFetch() ? { kind: props.kind, _trigger: fetchTrigger() } : false,
+    (params) => {
+      if (params === false) return Promise.resolve([] as MediaDeviceInfo[])
+      return getDevices(params.kind)
+    },
+  )
+
+  // Listen for device changes (plug/unplug)
+  function handleDeviceChange() {
+    if (shouldFetch()) {
+      setFetchTrigger(n => n + 1)
+    }
+  }
+  navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
+  onCleanup(() => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange))
+
+  // When devices load, check if the saved selection is still valid
+  createEffect(on(devices, (devs) => {
+    if (!devs || !props.selectedId) return
+    const stillExists = devs.some(d => d.deviceId === props.selectedId)
+    if (!stillExists) {
+      props.onSelect(undefined)
+    }
+  }))
 
   const isInput = () => props.kind === 'audioinput'
   const fallbackLabel = () => isInput() ? 'Microphone' : 'Speaker'
 
   const selectedLabel = () => {
     const devs = devices()
-    if (!devs) return 'Default'
+    if (!devs || !props.selectedId) return 'Default'
     const found = devs.find(d => d.deviceId === props.selectedId)
     return found ? found.label || `${fallbackLabel()} ${devs.indexOf(found) + 1}` : 'Default'
   }

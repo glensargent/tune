@@ -1,5 +1,6 @@
 import { createSignal, createEffect, onCleanup, Show, on } from 'solid-js'
 import { formatTime } from '../lib/audio'
+import { createPersistedSignal } from '../lib/persist'
 import DeviceSelect from './DeviceSelect'
 
 interface PlayerProps {
@@ -21,7 +22,7 @@ export default function Player(props: PlayerProps) {
   const [selectionStart, setSelectionStart] = createSignal<number | null>(props.initialStart ?? null)
   const [selectionEnd, setSelectionEnd] = createSignal<number | null>(props.initialEnd ?? null)
   const [waveformData, setWaveformData] = createSignal<number[]>([])
-  const [outputId, setOutputId] = createSignal<string | undefined>()
+  const [outputId, setOutputId] = createPersistedSignal<string | undefined>('tune:output-device', undefined)
 
   let audio: HTMLAudioElement | null = null
   let rafId: number | null = null
