@@ -12,23 +12,6 @@ interface RecorderProps {
 
 const WAVEFORM_SAMPLE_INTERVAL = 50
 
-const createLevelMonitor = (stream: MediaStream) => {
-  const ctx = new AudioContext()
-  const analyser = ctx.createAnalyser()
-  analyser.fftSize = 1024
-  ctx.createMediaStreamSource(stream).connect(analyser)
-  const data = new Uint8Array(analyser.fftSize)
-
-  const readLevel = (): number => {
-    analyser.getByteTimeDomainData(data)
-    return computeRms(data)
-  }
-
-  const dispose = () => ctx.close()
-
-  return { readLevel, dispose }
-}
-
 export default function Recorder(props: RecorderProps) {
   const [recording, setRecording] = createSignal(false)
   const [elapsed, setElapsed] = createSignal(0)
@@ -38,44 +21,53 @@ export default function Recorder(props: RecorderProps) {
   const [mono, setMono] = createPersistedSignal('tune:mono', true)
 
   let stream: MediaStream | null = null
-  let recordingCtx: AudioContext | null = null
+  let audioCtx: AudioContext | null = null
+  let analyser: AnalyserNode | null = null
+  let analyserData: Uint8Array | null = null
   let mediaRecorder: MediaRecorder | null = null
   let timer: ReturnType<typeof setInterval> | null = null
   let rafId: number | null = null
-  let monitor: ReturnType<typeof createLevelMonitor> | null = null
   let waveformSamples: number[] = []
   let lastSampleTime = 0
   let recordStartTime = 0
 
   const tick = () => {
-    if (!monitor) return
-    const rms = monitor.readLevel()
-    setLevel(rms)
+    if (analyser && analyserData) {
+      analyser.getByteTimeDomainData(analyserData)
+      const rms = computeRms(analyserData)
+      setLevel(rms)
 
-    const now = performance.now()
-    if (now - lastSampleTime > WAVEFORM_SAMPLE_INTERVAL) {
-      waveformSamples.push(rms)
-      lastSampleTime = now
+      const now = performance.now()
+      if (now - lastSampleTime > WAVEFORM_SAMPLE_INTERVAL) {
+        waveformSamples.push(rms)
+        lastSampleTime = now
+      }
     }
-
     rafId = requestAnimationFrame(tick)
   }
 
   const start = async () => {
     try {
       stream = await acquireMicStream(deviceId())
-      monitor = createLevelMonitor(stream)
-      tick()
 
-      // Route through Web Audio to force correct channel count.
-      // getUserMedia's channelCount is just a hint — this guarantees it.
+      // Single AudioContext for both level monitoring and channel routing
       const channels = mono() ? 1 : 2
-      recordingCtx = new AudioContext()
-      const source = recordingCtx.createMediaStreamSource(stream)
-      const dest = recordingCtx.createMediaStreamDestination()
+      audioCtx = new AudioContext()
+      const source = audioCtx.createMediaStreamSource(stream)
+
+      // Analyser for level metering (tap off the source)
+      analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 1024
+      analyserData = new Uint8Array(analyser.fftSize)
+      source.connect(analyser)
+
+      // Force correct channel count via destination
+      const dest = audioCtx.createMediaStreamDestination()
       dest.channelCount = channels
       dest.channelCountMode = 'explicit'
       source.connect(dest)
+
+      tick()
 
       mediaRecorder = new MediaRecorder(dest.stream)
       const chunks: Blob[] = []
@@ -107,12 +99,12 @@ export default function Recorder(props: RecorderProps) {
     mediaRecorder?.stop()
     stopStream(stream)
     stream = null
-    recordingCtx?.close()
-    recordingCtx = null
+    audioCtx?.close()
+    audioCtx = null
+    analyser = null
+    analyserData = null
     if (timer) clearInterval(timer)
     timer = null
-    monitor?.dispose()
-    monitor = null
     setRecording(false)
     setLevel(0)
   }
@@ -123,6 +115,13 @@ export default function Recorder(props: RecorderProps) {
     const m = Math.floor(elapsed() / 60)
     const s = elapsed() % 60
     return `${m}:${s.toString().padStart(2, '0')}`
+  }
+
+  // Map RMS to a 0-1 range with a noise floor cutoff
+  const breathe = () => {
+    const raw = level()
+    const clamped = Math.max(0, raw - 0.015) / 0.08
+    return Math.min(clamped, 1)
   }
 
   return (
@@ -141,14 +140,29 @@ export default function Recorder(props: RecorderProps) {
       </div>
 
       <div class="relative w-48 h-48 flex items-center justify-center">
-        <div
-          class="absolute inset-0 rounded-full bg-accent/10 transition-transform duration-75"
-          style={{ transform: `scale(${1 + level() * 2})` }}
-        />
-        <div
-          class="absolute inset-4 rounded-full bg-accent/15 transition-transform duration-75"
-          style={{ transform: `scale(${1 + level() * 1.5})` }}
-        />
+        <Show when={recording()}>
+          <div
+            class="absolute rounded-full bg-danger/5 transition-[width,height] duration-200 ease-out"
+            style={{
+              width: `${192 + breathe() * 200}px`,
+              height: `${192 + breathe() * 200}px`,
+            }}
+          />
+          <div
+            class="absolute rounded-full bg-danger/10 transition-[width,height] duration-150 ease-out"
+            style={{
+              width: `${160 + breathe() * 140}px`,
+              height: `${160 + breathe() * 140}px`,
+            }}
+          />
+          <div
+            class="absolute rounded-full bg-danger/15 transition-[width,height] duration-100 ease-out"
+            style={{
+              width: `${120 + breathe() * 80}px`,
+              height: `${120 + breathe() * 80}px`,
+            }}
+          />
+        </Show>
         <button
           onClick={() => recording() ? stop() : start()}
           class={`relative z-10 w-20 h-20 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
