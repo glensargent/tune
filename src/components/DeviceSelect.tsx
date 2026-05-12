@@ -42,8 +42,8 @@ const speakerIcon = (
 
 export default function DeviceSelect(props: DeviceSelectProps) {
   const [open, setOpen] = createSignal(false)
-  // Only fetch devices when the dropdown is first opened, not on mount
-  const [shouldFetch, setShouldFetch] = createSignal(false)
+  // Eagerly fetch if there's a saved selection, otherwise wait for first open
+  const [shouldFetch, setShouldFetch] = createSignal(!!props.selectedId)
   const [devices] = createResource(() => shouldFetch() ? props.kind : false, (kind) => {
     if (kind === false) return Promise.resolve([] as MediaDeviceInfo[])
     return getDevices(kind)

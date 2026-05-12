@@ -1,4 +1,5 @@
 import { createSignal, onCleanup, Show } from 'solid-js'
+import { createPersistedSignal } from '../lib/persist'
 import DeviceSelect from './DeviceSelect'
 import Metronome from './Metronome'
 
@@ -10,8 +11,9 @@ export default function Recorder(props: RecorderProps) {
   const [recording, setRecording] = createSignal(false)
   const [elapsed, setElapsed] = createSignal(0)
   const [level, setLevel] = createSignal(0)
-  const [deviceId, setDeviceId] = createSignal<string | undefined>()
-  const [outputId, setOutputId] = createSignal<string | undefined>()
+  const [deviceId, setDeviceId] = createPersistedSignal<string | undefined>('tune:input-device', undefined)
+  const [outputId, setOutputId] = createPersistedSignal<string | undefined>('tune:output-device', undefined)
+  const [mono, setMono] = createPersistedSignal('tune:mono', true)
 
   let mediaRecorder: MediaRecorder | null = null
   let stream: MediaStream | null = null
@@ -50,6 +52,7 @@ export default function Recorder(props: RecorderProps) {
       const constraints: MediaStreamConstraints = {
         audio: {
           ...(deviceId() ? { deviceId: { exact: deviceId() } } : {}),
+          channelCount: mono() ? 1 : 2,
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
@@ -126,6 +129,14 @@ export default function Recorder(props: RecorderProps) {
     <div class="flex flex-col items-center gap-6">
       {/* Device selectors */}
       <div class="self-end flex gap-2">
+        <button
+          onClick={() => setMono(!mono())}
+          class={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors cursor-pointer ${
+            mono() ? 'bg-surface-3 text-text-muted hover:text-text' : 'bg-accent text-white'
+          }`}
+        >
+          {mono() ? 'Mono' : 'Stereo'}
+        </button>
         <DeviceSelect kind="audioinput" selectedId={deviceId()} onSelect={setDeviceId} />
         <DeviceSelect kind="audiooutput" selectedId={outputId()} onSelect={setOutputId} />
       </div>

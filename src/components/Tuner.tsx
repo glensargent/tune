@@ -1,12 +1,13 @@
 import { createSignal, onCleanup } from 'solid-js'
 import { detectPitch, type PitchResult } from '../lib/pitch'
+import { createPersistedSignal } from '../lib/persist'
 import DeviceSelect from './DeviceSelect'
 
 export default function Tuner() {
   const [listening, setListening] = createSignal(false)
   const [displayPitch, setDisplayPitch] = createSignal<PitchResult | null>(null)
-  const [active, setActive] = createSignal(false) // whether we currently hear a note
-  const [deviceId, setDeviceId] = createSignal<string | undefined>()
+  const [active, setActive] = createSignal(false)
+  const [deviceId, setDeviceId] = createPersistedSignal<string | undefined>('tune:input-device', undefined)
 
   let audioContext: AudioContext | null = null
   let analyser: AnalyserNode | null = null
