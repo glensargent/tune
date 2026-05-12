@@ -18,7 +18,6 @@ export default function Player(props: PlayerProps) {
   const [speed, setSpeed] = createSignal(props.initialSpeed ?? 1)
   const [selectionStart, setSelectionStart] = createSignal<number | null>(props.initialStart ?? null)
   const [selectionEnd, setSelectionEnd] = createSignal<number | null>(props.initialEnd ?? null)
-  const [selecting, setSelecting] = createSignal(false)
   const [waveformData, setWaveformData] = createSignal<number[]>([])
   const [outputId, setOutputId] = createSignal<string | undefined>()
 
@@ -80,7 +79,6 @@ export default function Player(props: PlayerProps) {
   function updateTime() {
     if (audio) {
       setCurrentTime(audio.currentTime)
-      // If we have a selection end and we're past it, stop or loop
       const end = selectionEnd()
       if (end !== null && audio.currentTime >= end) {
         audio.currentTime = selectionStart() ?? 0
@@ -98,46 +96,74 @@ export default function Player(props: PlayerProps) {
       if (rafId) cancelAnimationFrame(rafId)
       setPlaying(false)
     } else {
+      // If there's a selection, start from the selection start
+      const s = selectionStart()
+      if (s !== null && selectionEnd() !== null) {
+        audio.currentTime = s
+        setCurrentTime(s)
+      }
       audio.play()
       setPlaying(true)
       updateTime()
     }
   }
 
+  // Drag threshold in pixels — below this it's a click (seek), above it's a drag (select)
+  const DRAG_THRESHOLD = 5
+
   function handleWaveformMouseDown(e: MouseEvent) {
     if (!waveformRef || duration() === 0) return
     const rect = waveformRef.getBoundingClientRect()
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-    const time = pct * duration()
+    const startX = e.clientX
+    const startPct = Math.max(0, Math.min(1, (startX - rect.left) / rect.width))
+    const startTime = startPct * duration()
+    let dragged = false
 
-    if (selecting()) {
-      setSelectionStart(time)
-      setSelectionEnd(null)
-
-      const handleMove = (e: MouseEvent) => {
+    const handleMove = (e: MouseEvent) => {
+      const dx = Math.abs(e.clientX - startX)
+      if (!dragged && dx > DRAG_THRESHOLD) {
+        dragged = true
+        setSelectionStart(startTime)
+      }
+      if (dragged) {
         const movePct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
         setSelectionEnd(movePct * duration())
       }
-      const handleUp = () => {
-        window.removeEventListener('mousemove', handleMove)
-        window.removeEventListener('mouseup', handleUp)
-        // Ensure start < end
+    }
+
+    const handleUp = () => {
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+
+      if (!dragged) {
+        // It was a click — seek
+        if (audio) {
+          audio.currentTime = startTime
+          setCurrentTime(startTime)
+        }
+      } else {
+        // Normalize so start < end
         const s = selectionStart()
         const end = selectionEnd()
         if (s !== null && end !== null && end < s) {
           setSelectionStart(end)
           setSelectionEnd(s)
         }
-      }
-      window.addEventListener('mousemove', handleMove)
-      window.addEventListener('mouseup', handleUp)
-    } else {
-      // Just seek
-      if (audio) {
-        audio.currentTime = time
-        setCurrentTime(time)
+        // Discard tiny accidental selections (< 0.2s)
+        const finalStart = selectionStart()
+        const finalEnd = selectionEnd()
+        if (finalStart !== null && finalEnd !== null && finalEnd - finalStart < 0.2) {
+          clearSelection()
+          if (audio) {
+            audio.currentTime = startTime
+            setCurrentTime(startTime)
+          }
+        }
       }
     }
+
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
   }
 
   function skipForward() {
@@ -157,7 +183,6 @@ export default function Player(props: PlayerProps) {
     if (audio) audio.playbackRate = newSpeed
   }
 
-  // Update output device on existing audio element when changed
   createEffect(on(() => outputId(), (oid) => {
     if (audio && oid && 'setSinkId' in audio) {
       try { (audio as any).setSinkId(oid) } catch {}
@@ -167,7 +192,6 @@ export default function Player(props: PlayerProps) {
   function clearSelection() {
     setSelectionStart(null)
     setSelectionEnd(null)
-    setSelecting(false)
   }
 
   function cutSelection() {
@@ -199,26 +223,14 @@ export default function Player(props: PlayerProps) {
       {/* Header row */}
       <div class="flex items-center justify-between gap-2">
         <h3 class="text-lg font-semibold text-text truncate">{props.name}</h3>
-        <div class="flex items-center gap-2 shrink-0">
-          <DeviceSelect kind="audiooutput" selectedId={outputId()} onSelect={setOutputId} />
-          <button
-          onClick={() => setSelecting(!selecting())}
-          class={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors cursor-pointer ${
-            selecting()
-              ? 'bg-accent text-white'
-              : 'bg-surface-3 text-text-muted hover:text-text'
-          }`}
-          >
-            {selecting() ? 'Selecting...' : 'Select Segment'}
-          </button>
-        </div>
+        <DeviceSelect kind="audiooutput" selectedId={outputId()} onSelect={setOutputId} />
       </div>
 
       {/* Waveform */}
       <div
         ref={waveformRef}
         onMouseDown={handleWaveformMouseDown}
-        class="relative h-24 bg-surface-2 rounded-xl overflow-hidden cursor-pointer select-none"
+        class="relative h-24 bg-surface-2 rounded-xl overflow-hidden cursor-crosshair select-none"
       >
         {/* Waveform bars */}
         <div class="absolute inset-0 flex items-center gap-px px-1">
@@ -251,6 +263,29 @@ export default function Player(props: PlayerProps) {
           style={{ left: `${duration() > 0 ? (currentTime() / duration()) * 100 : 0}%` }}
         />
       </div>
+
+      {/* Selection actions */}
+      <Show when={selectionStart() !== null && selectionEnd() !== null}>
+        <div class="flex items-center gap-3 p-3 bg-surface-2 rounded-xl -mt-2">
+          <div class="flex-1 text-sm text-text-muted">
+            <span class="text-text font-mono">{formatTime(selectionStart()!)}</span>
+            {' - '}
+            <span class="text-text font-mono">{formatTime(selectionEnd()!)}</span>
+          </div>
+          <button
+            onClick={cutSelection}
+            class="px-3 py-1.5 text-xs bg-accent text-white rounded-lg font-medium hover:bg-accent-hover transition-colors cursor-pointer"
+          >
+            Share
+          </button>
+          <button
+            onClick={clearSelection}
+            class="px-3 py-1.5 text-xs bg-surface-3 text-text-muted rounded-lg font-medium hover:text-text transition-colors cursor-pointer"
+          >
+            Clear
+          </button>
+        </div>
+      </Show>
 
       {/* Time display */}
       <div class="flex justify-between text-xs text-text-muted font-mono">
@@ -312,28 +347,6 @@ export default function Player(props: PlayerProps) {
         </div>
       </div>
 
-      {/* Selection actions */}
-      <Show when={selectionStart() !== null && selectionEnd() !== null}>
-        <div class="flex items-center gap-3 p-3 bg-surface-2 rounded-xl">
-          <div class="flex-1 text-sm text-text-muted">
-            Selected: <span class="text-text font-mono">{formatTime(selectionStart()!)}</span>
-            {' - '}
-            <span class="text-text font-mono">{formatTime(selectionEnd()!)}</span>
-          </div>
-          <button
-            onClick={cutSelection}
-            class="px-3 py-1.5 text-xs bg-accent text-white rounded-lg font-medium hover:bg-accent-hover transition-colors cursor-pointer"
-          >
-            Cut & Share
-          </button>
-          <button
-            onClick={clearSelection}
-            class="px-3 py-1.5 text-xs bg-surface-3 text-text-muted rounded-lg font-medium hover:text-text transition-colors cursor-pointer"
-          >
-            Clear
-          </button>
-        </div>
-      </Show>
     </div>
   )
 }
