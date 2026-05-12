@@ -23,7 +23,6 @@ export default function Player(props: PlayerProps) {
   let audio: HTMLAudioElement | null = null
   let rafId: number | null = null
   let waveformRef: HTMLDivElement | undefined
-  let progressRef: HTMLDivElement | undefined
 
   function createAudio() {
     if (audio) {
@@ -97,14 +96,6 @@ export default function Player(props: PlayerProps) {
       setPlaying(true)
       updateTime()
     }
-  }
-
-  function seek(e: MouseEvent) {
-    if (!audio || !progressRef || duration() === 0) return
-    const rect = progressRef.getBoundingClientRect()
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-    audio.currentTime = pct * duration()
-    setCurrentTime(audio.currentTime)
   }
 
   function handleWaveformMouseDown(e: MouseEvent) {
