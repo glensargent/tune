@@ -1,10 +1,31 @@
 import { createSignal, onCleanup, Show } from 'solid-js'
+import { computeRms, normalizeWaveform } from '../lib/audio'
+import { acquireMicStream, stopStream } from '../lib/devices'
 import { createPersistedSignal } from '../lib/persist'
 import DeviceSelect from './DeviceSelect'
 import Metronome from './Metronome'
 
 interface RecorderProps {
   onRecorded: (blob: Blob, name: string, waveform: number[], duration: number) => void
+}
+
+const WAVEFORM_SAMPLE_INTERVAL = 50
+
+const createLevelMonitor = (stream: MediaStream) => {
+  const ctx = new AudioContext()
+  const analyser = ctx.createAnalyser()
+  analyser.fftSize = 1024
+  ctx.createMediaStreamSource(stream).connect(analyser)
+  const data = new Uint8Array(analyser.fftSize)
+
+  const readLevel = (): number => {
+    analyser.getByteTimeDomainData(data)
+    return computeRms(data)
+  }
+
+  const dispose = () => ctx.close()
+
+  return { readLevel, dispose }
 }
 
 export default function Recorder(props: RecorderProps) {
@@ -15,66 +36,39 @@ export default function Recorder(props: RecorderProps) {
   const [outputId, setOutputId] = createPersistedSignal<string | undefined>('tune:output-device', undefined)
   const [mono, setMono] = createPersistedSignal('tune:mono', true)
 
-  let mediaRecorder: MediaRecorder | null = null
   let stream: MediaStream | null = null
+  let mediaRecorder: MediaRecorder | null = null
   let timer: ReturnType<typeof setInterval> | null = null
-  let analyser: AnalyserNode | null = null
-  let meterCtx: AudioContext | null = null
   let rafId: number | null = null
+  let monitor: ReturnType<typeof createLevelMonitor> | null = null
   let waveformSamples: number[] = []
   let lastSampleTime = 0
   let recordStartTime = 0
 
-  function monitorLevel() {
-    if (!analyser) return
-    const data = new Uint8Array(analyser.fftSize)
-    analyser.getByteTimeDomainData(data)
-    let sum = 0
-    for (let i = 0; i < data.length; i++) {
-      const v = (data[i] - 128) / 128
-      sum += v * v
-    }
-    const rms = Math.sqrt(sum / data.length)
+  const tick = () => {
+    if (!monitor) return
+    const rms = monitor.readLevel()
     setLevel(rms)
 
-    // Sample waveform data ~20 times per second for the waveform display
     const now = performance.now()
-    if (now - lastSampleTime > 50) {
+    if (now - lastSampleTime > WAVEFORM_SAMPLE_INTERVAL) {
       waveformSamples.push(rms)
       lastSampleTime = now
     }
 
-    rafId = requestAnimationFrame(monitorLevel)
+    rafId = requestAnimationFrame(tick)
   }
 
-  async function start() {
+  const start = async () => {
     try {
-      const constraints: MediaStreamConstraints = {
-        audio: {
-          ...(deviceId() ? { deviceId: { exact: deviceId() } } : {}),
-          channelCount: mono() ? 1 : 2,
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        },
-      }
-      stream = await navigator.mediaDevices.getUserMedia(constraints)
+      stream = await acquireMicStream(deviceId(), mono() ? 1 : 2)
+      monitor = createLevelMonitor(stream)
+      tick()
 
-      // Level metering — analyser only, not connected to destination,
-      // does not interfere with MediaRecorder which reads from the stream directly
-      meterCtx = new AudioContext()
-      analyser = meterCtx.createAnalyser()
-      analyser.fftSize = 1024
-      const source = meterCtx.createMediaStreamSource(stream)
-      source.connect(analyser)
-      // do NOT connect analyser to destination — we just read data from it
-      monitorLevel()
-
-      // Recording
       mediaRecorder = new MediaRecorder(stream)
       const chunks: Blob[] = []
 
-      mediaRecorder.ondataavailable = (e) => {
+      mediaRecorder.ondataavailable = e => {
         if (e.data.size > 0) chunks.push(e.data)
       }
 
@@ -82,10 +76,7 @@ export default function Recorder(props: RecorderProps) {
         const blob = new Blob(chunks, { type: mediaRecorder!.mimeType })
         const name = `Recording ${new Date().toLocaleTimeString()}`
         const dur = (performance.now() - recordStartTime) / 1000
-        // Normalize waveform to 0-1 range
-        const max = Math.max(...waveformSamples, 0.001)
-        const normalized = waveformSamples.map(v => v / max)
-        props.onRecorded(blob, name, normalized, dur)
+        props.onRecorded(blob, name, normalizeWaveform(waveformSamples), dur)
       }
 
       waveformSamples = []
@@ -95,29 +86,24 @@ export default function Recorder(props: RecorderProps) {
       setRecording(true)
       setElapsed(0)
       timer = setInterval(() => setElapsed(e => e + 1), 1000)
-    } catch {
-      // Mic permission denied
-    }
+    } catch { /* mic permission denied */ }
   }
 
-  function stop() {
+  const stop = () => {
     if (rafId) cancelAnimationFrame(rafId)
     rafId = null
     mediaRecorder?.stop()
-    stream?.getTracks().forEach(t => t.stop())
+    stopStream(stream)
     stream = null
     if (timer) clearInterval(timer)
     timer = null
-    meterCtx?.close()
-    meterCtx = null
-    analyser = null
+    monitor?.dispose()
+    monitor = null
     setRecording(false)
     setLevel(0)
   }
 
-  onCleanup(() => {
-    if (recording()) stop()
-  })
+  onCleanup(() => { if (recording()) stop() })
 
   const formatElapsed = () => {
     const m = Math.floor(elapsed() / 60)
@@ -127,7 +113,6 @@ export default function Recorder(props: RecorderProps) {
 
   return (
     <div class="flex flex-col items-center gap-6">
-      {/* Device selectors */}
       <div class="self-end flex gap-2">
         <button
           onClick={() => setMono(!mono())}
@@ -141,7 +126,6 @@ export default function Recorder(props: RecorderProps) {
         <DeviceSelect kind="audiooutput" selectedId={outputId()} onSelect={setOutputId} />
       </div>
 
-      {/* Level indicator */}
       <div class="relative w-48 h-48 flex items-center justify-center">
         <div
           class="absolute inset-0 rounded-full bg-accent/10 transition-transform duration-75"
@@ -154,9 +138,7 @@ export default function Recorder(props: RecorderProps) {
         <button
           onClick={() => recording() ? stop() : start()}
           class={`relative z-10 w-20 h-20 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-            recording()
-              ? 'bg-danger hover:bg-danger/80'
-              : 'bg-accent hover:bg-accent-hover'
+            recording() ? 'bg-danger hover:bg-danger/80' : 'bg-accent hover:bg-accent-hover'
           }`}
         >
           <Show when={recording()} fallback={
@@ -181,7 +163,6 @@ export default function Recorder(props: RecorderProps) {
         {recording() ? 'Recording... click to stop' : 'Click to start recording'}
       </p>
 
-      {/* Metronome */}
       <div class="w-full border-t border-border pt-6 mt-2">
         <Metronome outputDeviceId={outputId()} />
       </div>

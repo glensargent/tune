@@ -1,9 +1,9 @@
 import { createSignal, Show, For } from 'solid-js'
+import { parseHashConfig } from './lib/audio'
 import Tuner from './components/Tuner'
 import Recorder from './components/Recorder'
 import Player from './components/Player'
 import ShareModal from './components/ShareModal'
-import { decodeShareConfig } from './lib/audio'
 
 type Tab = 'tuner' | 'recorder' | 'player'
 
@@ -15,51 +15,54 @@ interface AudioTrack {
   recordedDuration?: number
 }
 
+const TABS: readonly { id: Tab; label: string; icon: string }[] = [
+  { id: 'tuner', label: 'Tuner', icon: 'M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z' },
+  { id: 'recorder', label: 'Record', icon: 'M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z' },
+  { id: 'player', label: 'Player', icon: 'M9 18V5l12 7-12 6z' },
+] as const
+
+const hashConfig = parseHashConfig()
+
+const createTrack = (blob: Blob, name: string, waveform?: number[], duration?: number): AudioTrack => ({
+  url: URL.createObjectURL(blob),
+  blob,
+  name,
+  recordedWaveform: waveform,
+  recordedDuration: duration,
+})
+
 export default function App() {
   const [tab, setTab] = createSignal<Tab>('recorder')
   const [tracks, setTracks] = createSignal<AudioTrack[]>([])
   const [activeTrack, setActiveTrack] = createSignal<AudioTrack | null>(null)
   const [shareData, setShareData] = createSignal<{ start: number; end: number; speed: number } | null>(null)
 
-  // Check URL hash for share config
-  const hashConfig = (() => {
-    const hash = window.location.hash
-    if (hash.startsWith('#config=')) {
-      return decodeShareConfig(hash.slice(8))
-    }
-    return null
-  })()
+  const addTrack = (track: AudioTrack) => {
+    setTracks(prev => [...prev, track])
+    setActiveTrack(track)
+    setTab('player')
+  }
 
-  function handleFileUpload(e: Event) {
+  const handleFileUpload = (e: Event) => {
     const input = e.target as HTMLInputElement
     const file = input.files?.[0]
     if (!file) return
-    const url = URL.createObjectURL(file)
-    const track: AudioTrack = { url, blob: file, name: file.name }
-    setTracks(prev => [...prev, track])
-    setActiveTrack(track)
-    setTab('player')
+    addTrack(createTrack(file, file.name))
     input.value = ''
   }
 
-  function handleRecorded(blob: Blob, name: string, waveform?: number[], duration?: number) {
-    const url = URL.createObjectURL(blob)
-    const track: AudioTrack = { url, blob, name, recordedWaveform: waveform, recordedDuration: duration }
-    setTracks(prev => [...prev, track])
-    setActiveTrack(track)
-    setTab('player')
-  }
+  const handleRecorded = (blob: Blob, name: string, waveform?: number[], duration?: number) =>
+    addTrack(createTrack(blob, name, waveform, duration))
 
-  function handleSegmentCut(start: number, end: number, speed: number) {
+  const handleSegmentCut = (start: number, end: number, speed: number) =>
     setShareData({ start, end, speed })
-  }
 
-  function selectTrack(track: AudioTrack) {
+  const selectTrack = (track: AudioTrack) => {
     setActiveTrack(track)
     setTab('player')
   }
 
-  function removeTrack(track: AudioTrack, e: Event) {
+  const removeTrack = (track: AudioTrack, e: Event) => {
     e.stopPropagation()
     URL.revokeObjectURL(track.url)
     setTracks(prev => prev.filter(t => t !== track))
@@ -68,15 +71,8 @@ export default function App() {
     }
   }
 
-  const tabs: { id: Tab; label: string; icon: string }[] = [
-    { id: 'tuner', label: 'Tuner', icon: 'M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z' },
-    { id: 'recorder', label: 'Record', icon: 'M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z' },
-    { id: 'player', label: 'Player', icon: 'M9 18V5l12 7-12 6z' },
-  ]
-
   return (
     <div class="min-h-screen bg-surface text-text flex flex-col">
-      {/* Header */}
       <header class="border-b border-border bg-surface-2/50 backdrop-blur-sm sticky top-0 z-40">
         <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
           <div class="flex items-center gap-2.5">
@@ -87,8 +83,6 @@ export default function App() {
             </div>
             <h1 class="text-lg font-bold tracking-tight">tune</h1>
           </div>
-
-          {/* File upload */}
           <label class="px-3 py-1.5 text-xs bg-surface-3 text-text-muted rounded-lg font-medium hover:text-text transition-colors cursor-pointer">
             Upload Audio
             <input type="file" accept="audio/*" class="hidden" onChange={handleFileUpload} />
@@ -96,17 +90,14 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tab navigation */}
       <nav class="border-b border-border bg-surface">
         <div class="max-w-3xl mx-auto px-4 flex gap-1">
-          <For each={tabs}>
-            {(t) => (
+          <For each={TABS}>
+            {t => (
               <button
                 onClick={() => setTab(t.id)}
                 class={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
-                  tab() === t.id
-                    ? 'border-accent text-accent'
-                    : 'border-transparent text-text-muted hover:text-text'
+                  tab() === t.id ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text'
                 }`}
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -119,19 +110,13 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Main content */}
       <main class="flex-1 max-w-3xl mx-auto w-full px-4 py-8">
-        {/* Tuner tab */}
-        <Show when={tab() === 'tuner'}>
-          <Tuner />
-        </Show>
+        <Show when={tab() === 'tuner'}><Tuner /></Show>
 
-        {/* Recorder tab */}
         <Show when={tab() === 'recorder'}>
           <Recorder onRecorded={handleRecorded} />
         </Show>
 
-        {/* Player tab */}
         <Show when={tab() === 'player'}>
           <Show when={activeTrack()} fallback={
             <div class="flex flex-col items-center gap-4 py-16">
@@ -155,7 +140,7 @@ export default function App() {
               </div>
             </div>
           }>
-            {(track) => (
+            {track => (
               <Player
                 audioUrl={track().url}
                 name={track().name}
@@ -170,13 +155,12 @@ export default function App() {
           </Show>
         </Show>
 
-        {/* Track list */}
         <Show when={tracks().length > 0}>
           <div class="mt-8 border-t border-border pt-6">
             <h3 class="text-sm font-medium text-text-muted mb-3">Library</h3>
             <div class="space-y-1.5">
               <For each={tracks()}>
-                {(track) => (
+                {track => (
                   <div
                     onClick={() => selectTrack(track)}
                     class={`flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors ${
@@ -192,7 +176,7 @@ export default function App() {
                     </div>
                     <span class="text-sm truncate flex-1">{track.name}</span>
                     <button
-                      onClick={(e) => removeTrack(track, e)}
+                      onClick={e => removeTrack(track, e)}
                       class="p-1 rounded hover:bg-surface-3 text-text-muted hover:text-danger transition-colors cursor-pointer shrink-0"
                     >
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -207,9 +191,8 @@ export default function App() {
         </Show>
       </main>
 
-      {/* Share modal */}
       <Show when={shareData()}>
-        {(data) => (
+        {data => (
           <ShareModal
             start={data().start}
             end={data().end}
