@@ -11,6 +11,8 @@ interface AudioTrack {
   url: string
   blob: Blob
   name: string
+  recordedWaveform?: number[]
+  recordedDuration?: number
 }
 
 export default function App() {
@@ -40,9 +42,9 @@ export default function App() {
     input.value = ''
   }
 
-  function handleRecorded(blob: Blob, name: string) {
+  function handleRecorded(blob: Blob, name: string, waveform?: number[], duration?: number) {
     const url = URL.createObjectURL(blob)
-    const track: AudioTrack = { url, blob, name }
+    const track: AudioTrack = { url, blob, name, recordedWaveform: waveform, recordedDuration: duration }
     setTracks(prev => [...prev, track])
     setActiveTrack(track)
     setTab('player')
@@ -161,6 +163,8 @@ export default function App() {
                 initialStart={hashConfig?.startTime}
                 initialEnd={hashConfig?.endTime}
                 onSegmentCut={handleSegmentCut}
+                precomputedWaveform={track().recordedWaveform}
+                precomputedDuration={track().recordedDuration}
               />
             )}
           </Show>

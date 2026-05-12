@@ -3,7 +3,7 @@ import DeviceSelect from './DeviceSelect'
 import Metronome from './Metronome'
 
 interface RecorderProps {
-  onRecorded: (blob: Blob, name: string) => void
+  onRecorded: (blob: Blob, name: string, waveform: number[], duration: number) => void
 }
 
 export default function Recorder(props: RecorderProps) {
@@ -15,11 +15,13 @@ export default function Recorder(props: RecorderProps) {
 
   let mediaRecorder: MediaRecorder | null = null
   let stream: MediaStream | null = null
-  let chunks: Blob[] = []
   let timer: ReturnType<typeof setInterval> | null = null
   let analyser: AnalyserNode | null = null
-  let audioCtx: AudioContext | null = null
+  let meterCtx: AudioContext | null = null
   let rafId: number | null = null
+  let waveformSamples: number[] = []
+  let lastSampleTime = 0
+  let recordStartTime = 0
 
   function monitorLevel() {
     if (!analyser) return
@@ -30,37 +32,62 @@ export default function Recorder(props: RecorderProps) {
       const v = (data[i] - 128) / 128
       sum += v * v
     }
-    setLevel(Math.sqrt(sum / data.length))
+    const rms = Math.sqrt(sum / data.length)
+    setLevel(rms)
+
+    // Sample waveform data ~20 times per second for the waveform display
+    const now = performance.now()
+    if (now - lastSampleTime > 50) {
+      waveformSamples.push(rms)
+      lastSampleTime = now
+    }
+
     rafId = requestAnimationFrame(monitorLevel)
   }
 
   async function start() {
     try {
       const constraints: MediaStreamConstraints = {
-        audio: deviceId() ? { deviceId: { exact: deviceId() } } : true,
+        audio: {
+          ...(deviceId() ? { deviceId: { exact: deviceId() } } : {}),
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
       }
       stream = await navigator.mediaDevices.getUserMedia(constraints)
-      mediaRecorder = new MediaRecorder(stream)
-      chunks = []
 
-      // Level monitoring
-      audioCtx = new AudioContext()
-      analyser = audioCtx.createAnalyser()
+      // Level metering — analyser only, not connected to destination,
+      // does not interfere with MediaRecorder which reads from the stream directly
+      meterCtx = new AudioContext()
+      analyser = meterCtx.createAnalyser()
       analyser.fftSize = 1024
-      const source = audioCtx.createMediaStreamSource(stream)
+      const source = meterCtx.createMediaStreamSource(stream)
       source.connect(analyser)
+      // do NOT connect analyser to destination — we just read data from it
       monitorLevel()
+
+      // Recording
+      mediaRecorder = new MediaRecorder(stream)
+      const chunks: Blob[] = []
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data)
       }
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' })
+        const blob = new Blob(chunks, { type: mediaRecorder!.mimeType })
         const name = `Recording ${new Date().toLocaleTimeString()}`
-        props.onRecorded(blob, name)
+        const dur = (performance.now() - recordStartTime) / 1000
+        // Normalize waveform to 0-1 range
+        const max = Math.max(...waveformSamples, 0.001)
+        const normalized = waveformSamples.map(v => v / max)
+        props.onRecorded(blob, name, normalized, dur)
       }
 
+      waveformSamples = []
+      lastSampleTime = 0
+      recordStartTime = performance.now()
       mediaRecorder.start()
       setRecording(true)
       setElapsed(0)
@@ -71,12 +98,15 @@ export default function Recorder(props: RecorderProps) {
   }
 
   function stop() {
+    if (rafId) cancelAnimationFrame(rafId)
+    rafId = null
     mediaRecorder?.stop()
     stream?.getTracks().forEach(t => t.stop())
+    stream = null
     if (timer) clearInterval(timer)
-    if (rafId) cancelAnimationFrame(rafId)
-    audioCtx?.close()
-    audioCtx = null
+    timer = null
+    meterCtx?.close()
+    meterCtx = null
     analyser = null
     setRecording(false)
     setLevel(0)

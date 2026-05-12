@@ -9,6 +9,8 @@ interface PlayerProps {
   initialStart?: number
   initialEnd?: number
   onSegmentCut?: (start: number, end: number, speed: number) => void
+  precomputedWaveform?: number[]
+  precomputedDuration?: number
 }
 
 export default function Player(props: PlayerProps) {
@@ -36,40 +38,64 @@ export default function Player(props: PlayerProps) {
     if (oid && 'setSinkId' in audio) {
       try { (audio as any).setSinkId(oid) } catch {}
     }
+    // Use precomputed data if available (recordings), otherwise decode (uploads)
+    if (props.precomputedDuration) {
+      setDuration(props.precomputedDuration)
+    }
+    if (props.precomputedWaveform) {
+      setWaveformData(props.precomputedWaveform)
+    }
+
     audio.addEventListener('loadedmetadata', () => {
-      setDuration(audio!.duration)
+      if (isFinite(audio!.duration) && audio!.duration > 0) {
+        setDuration(audio!.duration)
+      } else if (!props.precomputedDuration) {
+        // webm duration fix: seek to end to force browser to compute duration
+        audio!.currentTime = 1e10
+      }
       if (props.initialStart != null) {
         audio!.currentTime = props.initialStart
       }
     })
+    // For webm: once the browser resolves the seek, we get the real duration
+    audio.addEventListener('durationchange', () => {
+      if (isFinite(audio!.duration) && audio!.duration > 0) {
+        setDuration(audio!.duration)
+      }
+    })
     audio.addEventListener('ended', () => setPlaying(false))
 
-    // Generate waveform by decoding audio
-    fetch(props.audioUrl)
-      .then(r => r.arrayBuffer())
-      .then(buf => {
-        const ctx = new AudioContext()
-        return ctx.decodeAudioData(buf).then(decoded => {
-          ctx.close()
-          return decoded
+    // Decode audio for waveform (only for uploaded files, not recordings)
+    if (!props.precomputedWaveform) {
+      fetch(props.audioUrl)
+        .then(r => r.arrayBuffer())
+        .then(buf => {
+          const ctx = new AudioContext()
+          return ctx.decodeAudioData(buf).then(decoded => {
+            ctx.close()
+            return decoded
+          })
         })
-      })
-      .then(decoded => {
-        const raw = decoded.getChannelData(0)
-        const bars = 150
-        const blockSize = Math.floor(raw.length / bars)
-        const data: number[] = []
-        for (let i = 0; i < bars; i++) {
-          let sum = 0
-          for (let j = 0; j < blockSize; j++) {
-            sum += Math.abs(raw[i * blockSize + j])
+        .then(decoded => {
+          if (!props.precomputedDuration) {
+            setDuration(decoded.duration)
           }
-          data.push(sum / blockSize)
-        }
-        const max = Math.max(...data)
-        setWaveformData(data.map(v => v / max))
-      })
-      .catch(() => {})
+          const raw = decoded.getChannelData(0)
+          const bars = 150
+          const blockSize = Math.floor(raw.length / bars)
+          const data: number[] = []
+          for (let i = 0; i < bars; i++) {
+            let sum = 0
+            for (let j = 0; j < blockSize; j++) {
+              sum += Math.abs(raw[i * blockSize + j])
+            }
+            data.push(sum / blockSize)
+          }
+          const max = Math.max(...data)
+          setWaveformData(data.map(v => v / max))
+        })
+        .catch(() => {})
+    }
   }
 
   createEffect(on(() => props.audioUrl, () => {

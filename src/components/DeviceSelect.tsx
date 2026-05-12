@@ -7,15 +7,22 @@ interface DeviceSelectProps {
 }
 
 async function getDevices(kind: string): Promise<MediaDeviceInfo[]> {
-  // Need a brief getUserMedia call to trigger permission prompt,
-  // otherwise enumerateDevices returns empty labels
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    stream.getTracks().forEach(t => t.stop())
-  } catch {
-    return []
+  // First try without getUserMedia — if permission was already granted,
+  // labels will be populated and we avoid grabbing/releasing the mic
+  let devices = await navigator.mediaDevices.enumerateDevices()
+  const hasLabels = devices.some(d => d.kind === kind && d.label)
+
+  if (!hasLabels) {
+    // Need a brief getUserMedia to trigger the permission prompt
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach(t => t.stop())
+    } catch {
+      return []
+    }
+    devices = await navigator.mediaDevices.enumerateDevices()
   }
-  const devices = await navigator.mediaDevices.enumerateDevices()
+
   return devices.filter(d => d.kind === kind)
 }
 
@@ -35,7 +42,12 @@ const speakerIcon = (
 
 export default function DeviceSelect(props: DeviceSelectProps) {
   const [open, setOpen] = createSignal(false)
-  const [devices] = createResource(() => props.kind, getDevices)
+  // Only fetch devices when the dropdown is first opened, not on mount
+  const [shouldFetch, setShouldFetch] = createSignal(false)
+  const [devices] = createResource(() => shouldFetch() ? props.kind : false, (kind) => {
+    if (kind === false) return Promise.resolve([] as MediaDeviceInfo[])
+    return getDevices(kind)
+  })
 
   const isInput = () => props.kind === 'audioinput'
   const fallbackLabel = () => isInput() ? 'Microphone' : 'Speaker'
@@ -50,7 +62,7 @@ export default function DeviceSelect(props: DeviceSelectProps) {
   return (
     <div class="relative">
       <button
-        onClick={() => setOpen(!open())}
+        onClick={() => { setShouldFetch(true); setOpen(!open()) }}
         class="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-surface-3 text-text-muted rounded-lg font-medium hover:text-text transition-colors cursor-pointer"
       >
         {isInput() ? micIcon : speakerIcon}
