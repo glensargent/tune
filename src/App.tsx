@@ -210,7 +210,6 @@ export default function App() {
             start={data().start}
             end={data().end}
             speed={data().speed}
-            audioBlob={activeTrack()!.blob}
             onClose={() => setShareData(null)}
           />
         )}

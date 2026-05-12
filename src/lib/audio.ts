@@ -8,14 +8,6 @@ export function createAudioBuffer(audioContext: AudioContext, arrayBuffer: Array
   return audioContext.decodeAudioData(arrayBuffer)
 }
 
-export function encodeShareConfig(config: {
-  speed: number
-  startTime: number
-  endTime: number
-}): string {
-  return btoa(JSON.stringify(config))
-}
-
 export function decodeShareConfig(hash: string): {
   speed: number
   startTime: number
