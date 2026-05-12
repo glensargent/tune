@@ -91,7 +91,8 @@ export default function Recorder(props: RecorderProps) {
 
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunks, { type: mediaRecorder!.mimeType })
-        const name = `Recording ${new Date().toLocaleTimeString()}`
+        const now = new Date()
+        const name = `Recording ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`
         const dur = (performance.now() - recordStartTime) / 1000
 
         // Merge PCM chunks into a single Float32Array
