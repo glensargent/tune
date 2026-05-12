@@ -7,6 +7,7 @@ import Metronome from './Metronome'
 
 interface RecorderProps {
   onRecorded: (blob: Blob, name: string, waveform: number[], duration: number) => void
+  onFileUpload: (e: Event) => void
 }
 
 const WAVEFORM_SAMPLE_INTERVAL = 50
@@ -159,9 +160,18 @@ export default function Recorder(props: RecorderProps) {
         </div>
       </Show>
 
-      <p class="text-text-muted text-sm">
-        {recording() ? 'Recording... click to stop' : 'Click to start recording'}
-      </p>
+      <div class="flex items-center gap-3">
+        <p class="text-text-muted text-sm">
+          {recording() ? 'Recording... click to stop' : 'Click to start recording'}
+        </p>
+        <Show when={!recording()}>
+          <span class="text-text-muted text-sm">or</span>
+          <label class="px-3 py-1.5 text-xs bg-surface-3 text-text-muted rounded-lg font-medium hover:text-text transition-colors cursor-pointer">
+            Upload File
+            <input type="file" accept="audio/*" class="hidden" onChange={props.onFileUpload} />
+          </label>
+        </Show>
+      </div>
 
       <div class="w-full border-t border-border pt-6 mt-2">
         <Metronome outputDeviceId={outputId()} />

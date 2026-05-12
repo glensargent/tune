@@ -10,6 +10,7 @@ interface PlayerProps {
   initialStart?: number
   initialEnd?: number
   onSegmentCut?: (start: number, end: number, speed: number) => void
+  onClose?: () => void
   precomputedWaveform?: number[]
   precomputedDuration?: number
 }
@@ -195,7 +196,20 @@ export default function Player(props: PlayerProps) {
     <div class="flex flex-col gap-4 w-full">
       <div class="flex items-center justify-between gap-2">
         <h3 class="text-lg font-semibold text-text truncate">{props.name}</h3>
-        <DeviceSelect kind="audiooutput" selectedId={outputId()} onSelect={setOutputId} />
+        <div class="flex items-center gap-2 shrink-0">
+          <DeviceSelect kind="audiooutput" selectedId={outputId()} onSelect={setOutputId} />
+          <Show when={props.onClose}>
+            <button
+              onClick={props.onClose}
+              class="p-1.5 rounded-lg hover:bg-surface-3 text-text-muted hover:text-danger transition-colors cursor-pointer"
+              title="Close"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </Show>
+        </div>
       </div>
 
       <div
