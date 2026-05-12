@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", monospace;
+  --color-surface: #0f0f13;
+  --color-surface-2: #1a1a23;
+  --color-surface-3: #242430;
+  --color-border: #2e2e3e;
+  --color-accent: #8b5cf6;
+  --color-accent-hover: #a78bfa;
+  --color-accent-dim: rgba(139, 92, 246, 0.15);
+  --color-text: #e2e2e8;
+  --color-text-muted: #8888a0;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #eab308;
+}
