@@ -29,24 +29,22 @@ export default function Recorder(props: RecorderProps) {
   let pcmChunks: Float32Array[] = []
   let recordingSampleRate = 44100
   let timer: ReturnType<typeof setInterval> | null = null
-  let rafId: number | null = null
+  let levelTimer: ReturnType<typeof setInterval> | null = null
   let waveformSamples: number[] = []
   let lastSampleTime = 0
   let recordStartTime = 0
 
   const tick = () => {
-    if (analyser && analyserData) {
-      analyser.getByteTimeDomainData(analyserData)
-      const rms = computeRms(analyserData)
-      setLevel(rms)
+    if (!analyser || !analyserData) return
+    analyser.getByteTimeDomainData(analyserData)
+    const rms = computeRms(analyserData)
+    setLevel(rms)
 
-      const now = performance.now()
-      if (now - lastSampleTime > WAVEFORM_SAMPLE_INTERVAL) {
-        waveformSamples.push(rms)
-        lastSampleTime = now
-      }
+    const now = performance.now()
+    if (now - lastSampleTime > WAVEFORM_SAMPLE_INTERVAL) {
+      waveformSamples.push(rms)
+      lastSampleTime = now
     }
-    rafId = requestAnimationFrame(tick)
   }
 
   const start = async () => {
@@ -80,7 +78,11 @@ export default function Recorder(props: RecorderProps) {
       source.connect(pcmCapture)
       pcmCapture.connect(audioCtx.destination) // must be connected to work
 
-      tick()
+      // iOS Safari suspends AudioContext — must resume after user gesture
+      if (audioCtx.state === 'suspended') await audioCtx.resume()
+
+      // Use setInterval instead of rAF — iOS throttles rAF during audio
+      levelTimer = setInterval(tick, 50)
 
       mediaRecorder = new MediaRecorder(dest.stream)
       const chunks: Blob[] = []
@@ -118,8 +120,8 @@ export default function Recorder(props: RecorderProps) {
   }
 
   const stop = () => {
-    if (rafId) cancelAnimationFrame(rafId)
-    rafId = null
+    if (levelTimer) clearInterval(levelTimer)
+    levelTimer = null
     mediaRecorder?.stop()
     stopStream(stream)
     stream = null
