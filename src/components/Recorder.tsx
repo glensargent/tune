@@ -38,6 +38,7 @@ export default function Recorder(props: RecorderProps) {
   const [mono, setMono] = createPersistedSignal('tune:mono', true)
 
   let stream: MediaStream | null = null
+  let recordingCtx: AudioContext | null = null
   let mediaRecorder: MediaRecorder | null = null
   let timer: ReturnType<typeof setInterval> | null = null
   let rafId: number | null = null
@@ -62,11 +63,21 @@ export default function Recorder(props: RecorderProps) {
 
   const start = async () => {
     try {
-      stream = await acquireMicStream(deviceId(), mono() ? 1 : 2)
+      stream = await acquireMicStream(deviceId())
       monitor = createLevelMonitor(stream)
       tick()
 
-      mediaRecorder = new MediaRecorder(stream)
+      // Route through Web Audio to force correct channel count.
+      // getUserMedia's channelCount is just a hint — this guarantees it.
+      const channels = mono() ? 1 : 2
+      recordingCtx = new AudioContext()
+      const source = recordingCtx.createMediaStreamSource(stream)
+      const dest = recordingCtx.createMediaStreamDestination()
+      dest.channelCount = channels
+      dest.channelCountMode = 'explicit'
+      source.connect(dest)
+
+      mediaRecorder = new MediaRecorder(dest.stream)
       const chunks: Blob[] = []
 
       mediaRecorder.ondataavailable = e => {
@@ -96,6 +107,8 @@ export default function Recorder(props: RecorderProps) {
     mediaRecorder?.stop()
     stopStream(stream)
     stream = null
+    recordingCtx?.close()
+    recordingCtx = null
     if (timer) clearInterval(timer)
     timer = null
     monitor?.dispose()
