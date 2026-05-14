@@ -4,13 +4,20 @@ type PersistedSignal<T> = readonly [Accessor<T>, (v: T | ((prev: T) => T)) => T]
 
 export const createPersistedSignal = <T>(key: string, defaultValue: T): PersistedSignal<T> => {
   const stored = localStorage.getItem(key)
-  const initial = stored !== null ? JSON.parse(stored) as T : defaultValue
+  let initial = defaultValue
+  if (stored !== null) {
+    try { initial = JSON.parse(stored) as T } catch { /* corrupted value, use default */ }
+  }
   const [value, setValue] = createSignal<T>(initial)
 
   const setAndPersist = (v: T | ((prev: T) => T)): T => {
     const next = typeof v === 'function' ? (v as (prev: T) => T)(value()) : v
     setValue(() => next)
-    localStorage.setItem(key, JSON.stringify(next))
+    if (next === undefined) {
+      localStorage.removeItem(key)
+    } else {
+      localStorage.setItem(key, JSON.stringify(next))
+    }
     return next
   }
 
