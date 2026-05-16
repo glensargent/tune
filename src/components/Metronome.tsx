@@ -129,7 +129,7 @@ export default function Metronome(props: MetronomeProps) {
             const val = parseInt(e.currentTarget.value)
             if (!isNaN(val)) setBpm(clampBpm(val))
           }}
-          class="w-10 text-center text-sm font-bold bg-transparent text-text outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          class="w-10 text-center text-base font-bold bg-transparent text-text outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           min={BPM_MIN}
           max={BPM_MAX}
         />
